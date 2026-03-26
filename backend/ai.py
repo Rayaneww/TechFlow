@@ -9,6 +9,7 @@ load_dotenv()
 PROMPT_PATH = Path(__file__).parent / "prompts" / "card_prompt.txt"
 SYSTEM_PROMPT = PROMPT_PATH.read_text().strip()
 
+GROQ_KEY = os.getenv("GROQ_API_KEY", "")
 ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 OPENAI_KEY = os.getenv("OPENAI_API_KEY", "")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY", "")
@@ -43,6 +44,22 @@ def _validate_card(data: dict) -> dict:
         "summary": str(data.get("summary", ""))[:300],
         "reading_time": int(rt) if rt else None,
     }
+
+
+async def generate_card_groq(article: dict) -> dict:
+    from groq import AsyncGroq
+
+    client = AsyncGroq(api_key=GROQ_KEY)
+    resp = await client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        max_tokens=512,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": _build_user_message(article)},
+        ],
+    )
+    raw = resp.choices[0].message.content
+    return _validate_card(_parse_json(raw))
 
 
 async def generate_card_anthropic(article: dict) -> dict:
@@ -108,6 +125,12 @@ def _fallback_card(article: dict) -> dict:
 
 
 async def generate_card(article: dict) -> dict:
+    try:
+        if GROQ_KEY:
+            return await generate_card_groq(article)
+    except Exception as e:
+        print(f"[ai] Groq failed: {e}")
+
     try:
         if GEMINI_KEY:
             return await generate_card_gemini(article)
