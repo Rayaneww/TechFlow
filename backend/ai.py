@@ -54,7 +54,7 @@ async def generate_card_groq(article: dict) -> dict:
     for attempt in range(3):
         try:
             resp = await client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model="llama-3.1-8b-instant",
                 max_tokens=512,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
