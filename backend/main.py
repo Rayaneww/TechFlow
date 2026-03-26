@@ -47,7 +47,7 @@ async def ingest_topic(topic: str, session: Session):
         return
     _ingesting.add(topic)
     try:
-        articles = await fetch_articles(topic, limit=20)
+        articles = await fetch_articles(topic, limit=10)
         existing_urls = set(
             row for row in session.exec(select(TechCard.url).where(TechCard.topic == topic))
         )
@@ -56,8 +56,8 @@ async def ingest_topic(topic: str, session: Session):
         if not new_articles:
             return
 
-        # Generate cards concurrently (up to 5 at once to avoid rate limits)
-        sem = asyncio.Semaphore(5)
+        # Generate cards one at a time to stay within Groq free tier limits
+        sem = asyncio.Semaphore(1)
 
         async def _gen(article: dict):
             async with sem:

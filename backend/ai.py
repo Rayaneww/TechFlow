@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -50,16 +51,23 @@ async def generate_card_groq(article: dict) -> dict:
     from groq import AsyncGroq
 
     client = AsyncGroq(api_key=GROQ_KEY)
-    resp = await client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        max_tokens=512,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": _build_user_message(article)},
-        ],
-    )
-    raw = resp.choices[0].message.content
-    return _validate_card(_parse_json(raw))
+    for attempt in range(3):
+        try:
+            resp = await client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                max_tokens=512,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": _build_user_message(article)},
+                ],
+            )
+            raw = resp.choices[0].message.content
+            return _validate_card(_parse_json(raw))
+        except Exception as e:
+            if "429" in str(e) and attempt < 2:
+                await asyncio.sleep(5 * (attempt + 1))
+                continue
+            raise
 
 
 async def generate_card_anthropic(article: dict) -> dict:
