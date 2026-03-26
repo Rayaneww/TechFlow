@@ -34,12 +34,14 @@ def _parse_json(text: str) -> dict:
 
 
 def _validate_card(data: dict) -> dict:
+    rt = data.get("reading_time")
     return {
         "title": str(data.get("title", "Untitled"))[:120],
         "key_points": [str(p) for p in data.get("key_points", [])[:3]],
         "difficulty": int(data.get("difficulty", 2)),
         "tags": [str(t).lower() for t in data.get("tags", [])[:4]],
-        "summary": str(data.get("summary", ""))[:200],
+        "summary": str(data.get("summary", ""))[:300],
+        "reading_time": int(rt) if rt else None,
     }
 
 

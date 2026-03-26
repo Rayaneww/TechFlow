@@ -1,9 +1,16 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { motion, useMotionValue, useTransform, animate } from 'framer-motion'
 import { getSwipeDecision } from '../hooks/useSwipe.js'
 
-const DIFFICULTY_LABEL = { 1: 'Beginner', 2: 'Intermediate', 3: 'Advanced' }
+const DIFFICULTY_LABEL = { 1: 'Débutant', 2: 'Intermédiaire', 3: 'Avancé' }
 const DIFFICULTY_COLOR = { 1: '#c2f542', 2: '#f59e0b', 3: '#ff453a' }
+
+const TOPIC_LABEL = {
+  llm: 'LLM & IA',
+  bioinformatics: 'Bioinformatique',
+  cybersecurity: 'Cybersécurité',
+  devops: 'DevOps',
+}
 
 const GRADIENT_CLASS = {
   llm: 'gradient-llm',
@@ -12,20 +19,30 @@ const GRADIENT_CLASS = {
   devops: 'gradient-devops',
 }
 
+function formatDate(raw) {
+  if (!raw) return null
+  try {
+    const d = new Date(raw)
+    if (isNaN(d)) return null
+    return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })
+  } catch {
+    return null
+  }
+}
+
 function DifficultyDots({ level }) {
   const color = DIFFICULTY_COLOR[level] || '#636878'
   return (
-    <div className="flex items-center gap-1" title={DIFFICULTY_LABEL[level]}>
+    <div className="flex items-center gap-1">
       {[1, 2, 3].map((i) => (
         <span
           key={i}
-          className={i <= level ? 'dot-filled' : 'dot-empty'}
           style={{
             display: 'block',
             width: 7,
             height: 7,
             borderRadius: '50%',
-            color,
+            background: i <= level ? color : 'rgba(255,255,255,0.1)',
           }}
         />
       ))}
@@ -35,8 +52,10 @@ function DifficultyDots({ level }) {
 
 function TagPill({ tag }) {
   return (
-    <span className="font-mono text-[10px] tracking-wider uppercase px-2 py-0.5 rounded-full"
-      style={{ background: 'rgba(255,255,255,0.06)', color: '#636878', border: '1px solid rgba(255,255,255,0.08)' }}>
+    <span
+      className="font-mono text-[10px] tracking-wider uppercase px-2 py-0.5 rounded-full"
+      style={{ background: 'rgba(255,255,255,0.06)', color: '#636878', border: '1px solid rgba(255,255,255,0.08)' }}
+    >
       {tag}
     </span>
   )
@@ -45,6 +64,7 @@ function TagPill({ tag }) {
 export default function SwipeCard({ card, onSave, onIgnore, isTop, stackIndex }) {
   const x = useMotionValue(0)
   const dragging = useRef(false)
+  const [imgError, setImgError] = useState(false)
 
   // Visual transforms from drag
   const rotate = useTransform(x, [-280, 280], [-18, 18])
@@ -72,6 +92,8 @@ export default function SwipeCard({ card, onSave, onIgnore, isTop, stackIndex })
 
   const gradientClass = GRADIENT_CLASS[card.topic] || 'gradient-default'
   const diffColor = DIFFICULTY_COLOR[card.difficulty] || '#636878'
+  const formattedDate = formatDate(card.published_date)
+  const showImage = card.image_url && !imgError
 
   return (
     <motion.div
@@ -119,100 +141,128 @@ export default function SwipeCard({ card, onSave, onIgnore, isTop, stackIndex })
           </>
         )}
 
-        {/* Image / Gradient header */}
-        <div className="relative flex-shrink-0 h-44 overflow-hidden">
-          {card.image_url ? (
+        {/* ── Image / Gradient header ──────────────────────────── */}
+        <div className="relative flex-shrink-0 overflow-hidden" style={{ height: '48%', minHeight: 160, maxHeight: 240 }}>
+          {showImage ? (
             <img
               src={card.image_url}
               alt=""
               className="w-full h-full object-cover"
               loading="lazy"
               draggable={false}
-              onError={(e) => {
-                e.target.style.display = 'none'
-                e.target.parentElement.classList.add(gradientClass)
-              }}
+              onError={() => setImgError(true)}
             />
           ) : (
             <div className={`w-full h-full ${gradientClass}`} />
           )}
-          {/* Gradient fade to card surface */}
+
+          {/* Gradient fade to card */}
           <div
             className="absolute inset-0"
-            style={{ background: 'linear-gradient(to bottom, transparent 40%, #10131a 100%)' }}
+            style={{ background: 'linear-gradient(to bottom, rgba(16,19,26,0.15) 0%, #10131a 100%)' }}
           />
 
-          {/* Source + date badge */}
-          <div className="absolute bottom-3 left-4 right-4 flex items-end justify-between">
+          {/* Topic badge — top left */}
+          <div className="absolute top-3 left-4 z-10">
             <span
-              className="font-mono text-[10px] tracking-widest uppercase"
-              style={{ color: '#636878' }}
+              className="font-mono text-[9px] tracking-widest uppercase px-2 py-1 rounded-lg"
+              style={{
+                background: 'rgba(0,0,0,0.55)',
+                backdropFilter: 'blur(6px)',
+                color: '#a0a4b8',
+                border: '1px solid rgba(255,255,255,0.1)',
+              }}
             >
+              {TOPIC_LABEL[card.topic] || card.topic}
+            </span>
+          </div>
+
+          {/* Reading time — top right */}
+          {card.reading_time && (
+            <div className="absolute top-3 right-4 z-10">
+              <span
+                className="font-mono text-[9px] tracking-widest uppercase px-2 py-1 rounded-lg"
+                style={{
+                  background: 'rgba(0,0,0,0.55)',
+                  backdropFilter: 'blur(6px)',
+                  color: '#636878',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                }}
+              >
+                ⏱ {card.reading_time} min
+              </span>
+            </div>
+          )}
+
+          {/* Source + date — bottom */}
+          <div className="absolute bottom-3 left-4 right-4 flex items-end justify-between z-10">
+            <span className="font-mono text-[10px] tracking-widest uppercase" style={{ color: '#636878' }}>
               {card.source}
             </span>
-            {card.published_date && (
+            {formattedDate && (
               <span className="font-mono text-[9px]" style={{ color: '#3d4050' }}>
-                {card.published_date.slice(0, 16)}
+                {formattedDate}
               </span>
             )}
           </div>
         </div>
 
-        {/* Card body */}
-        <div className="flex flex-col flex-1 px-5 pt-3 pb-5 gap-3 overflow-hidden">
-          {/* Difficulty + topic row */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <DifficultyDots level={card.difficulty} />
-              <span
-                className="font-mono text-[10px] tracking-wider"
-                style={{ color: diffColor }}
-              >
-                {DIFFICULTY_LABEL[card.difficulty]}
-              </span>
-            </div>
-            <span
-              className="font-mono text-[10px] tracking-widest uppercase px-2 py-0.5 rounded-full"
-              style={{
-                background: 'rgba(255,255,255,0.04)',
-                color: '#3d4050',
-                border: '1px solid rgba(255,255,255,0.06)',
-              }}
-            >
-              {card.topic}
+        {/* ── Card body ────────────────────────────────────────── */}
+        <div className="flex flex-col flex-1 px-5 pt-3 pb-4 gap-2.5 overflow-hidden">
+
+          {/* Difficulty row */}
+          <div className="flex items-center gap-2">
+            <DifficultyDots level={card.difficulty} />
+            <span className="font-mono text-[10px] tracking-wider" style={{ color: diffColor }}>
+              {DIFFICULTY_LABEL[card.difficulty]}
             </span>
           </div>
 
-          {/* Title */}
+          {/* AI title */}
           <h2
             className="font-display font-700 leading-tight"
-            style={{ fontSize: '1.22rem', color: '#f0f2f8', letterSpacing: '-0.01em' }}
+            style={{ fontSize: '1.15rem', color: '#f0f2f8', letterSpacing: '-0.01em' }}
           >
             {card.title}
           </h2>
 
+          {/* Original title (subtitle) */}
+          {card.original_title && card.original_title !== card.title && (
+            <p
+              className="text-[11px] leading-snug"
+              style={{ color: '#3d4050', fontStyle: 'italic' }}
+              title="Titre original"
+            >
+              {card.original_title.length > 90
+                ? card.original_title.slice(0, 90) + '…'
+                : card.original_title}
+            </p>
+          )}
+
           {/* Summary */}
           {card.summary && (
-            <p className="text-sm leading-relaxed" style={{ color: '#636878' }}>
+            <p className="text-sm leading-relaxed" style={{ color: '#8b90a4' }}>
               {card.summary}
             </p>
           )}
 
           {/* Key points */}
-          <ul className="flex flex-col gap-2 flex-1">
+          <ul className="flex flex-col gap-1.5 flex-1 overflow-hidden">
             {card.key_points.map((point, i) => (
-              <li key={i} className="flex items-start gap-2.5 text-sm" style={{ color: '#b0b4c4' }}>
+              <li key={i} className="flex items-start gap-2.5 text-[13px]" style={{ color: '#b0b4c4' }}>
                 <span
-                  className="flex-shrink-0 mt-1.5 rounded-full"
-                  style={{ width: 5, height: 5, background: '#c2f542', display: 'block' }}
-                />
+                  className="flex-shrink-0 font-mono text-[9px] font-bold mt-0.5"
+                  style={{ color: '#c2f542', minWidth: 14 }}
+                >
+                  {i + 1}.
+                </span>
                 {point}
               </li>
             ))}
           </ul>
 
-          {/* Footer: tags + read button */}
-          <div className="flex items-center justify-between pt-1">
+          {/* Footer: tags + read link */}
+          <div className="flex items-center justify-between pt-1 flex-shrink-0">
             <div className="flex items-center gap-1.5 flex-wrap">
               {card.tags.slice(0, 3).map((t) => (
                 <TagPill key={t} tag={t} />
@@ -223,22 +273,22 @@ export default function SwipeCard({ card, onSave, onIgnore, isTop, stackIndex })
               target="_blank"
               rel="noopener noreferrer"
               onClick={(e) => e.stopPropagation()}
-              className="font-mono text-[10px] tracking-widest uppercase flex items-center gap-1 transition-colors"
+              className="font-mono text-[10px] tracking-widest uppercase flex items-center gap-1 transition-colors flex-shrink-0 ml-2"
               style={{ color: '#3d4050' }}
               onMouseEnter={(e) => (e.currentTarget.style.color = '#c2f542')}
               onMouseLeave={(e) => (e.currentTarget.style.color = '#3d4050')}
             >
-              Read ↗
+              Lire ↗
             </a>
           </div>
         </div>
       </div>
 
-      {/* SAVE badge */}
+      {/* SAUVER badge */}
       {isTop && (
         <motion.div
           className="absolute top-8 left-5 z-20 pointer-events-none"
-          style={{ opacity: saveOpacity }}
+          style={{ opacity: saveOpacity, rotate: -12 }}
         >
           <span
             className="font-display font-800 text-xl tracking-widest uppercase px-3 py-1 rounded-lg"
@@ -246,20 +296,19 @@ export default function SwipeCard({ card, onSave, onIgnore, isTop, stackIndex })
               color: '#c2f542',
               border: '2.5px solid #c2f542',
               background: 'rgba(194,245,66,0.08)',
-              transform: 'rotate(-12deg)',
               display: 'block',
             }}
           >
-            SAVE
+            SAUVER
           </span>
         </motion.div>
       )}
 
-      {/* IGNORE badge */}
+      {/* IGNORER badge */}
       {isTop && (
         <motion.div
           className="absolute top-8 right-5 z-20 pointer-events-none"
-          style={{ opacity: ignoreOpacity }}
+          style={{ opacity: ignoreOpacity, rotate: 12 }}
         >
           <span
             className="font-display font-800 text-xl tracking-widest uppercase px-3 py-1 rounded-lg"
@@ -267,11 +316,10 @@ export default function SwipeCard({ card, onSave, onIgnore, isTop, stackIndex })
               color: '#ff453a',
               border: '2.5px solid #ff453a',
               background: 'rgba(255,69,58,0.08)',
-              transform: 'rotate(12deg)',
               display: 'block',
             }}
           >
-            SKIP
+            IGNORER
           </span>
         </motion.div>
       )}

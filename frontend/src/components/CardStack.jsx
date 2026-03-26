@@ -5,8 +5,9 @@ import { api } from '../api/client.js'
 
 const REFETCH_THRESHOLD = 3
 const VISIBLE_CARDS = 3
+const POLL_INTERVAL = 6000 // ms — poll when empty waiting for ingestion
 
-function EmptyState({ topic, onRefresh, loading }) {
+function EmptyState({ topic, onRefresh, loading, polling }) {
   return (
     <div className="flex flex-col items-center justify-center h-full gap-6 text-center px-8">
       <div
@@ -17,30 +18,17 @@ function EmptyState({ topic, onRefresh, loading }) {
       </div>
       <div>
         <p className="font-display font-600 text-lg" style={{ color: '#f0f2f8' }}>
-          {loading ? 'Curating your feed…' : 'All caught up'}
+          {loading || polling ? 'Curation en cours…' : 'Tout vu !'}
         </p>
         <p className="text-sm mt-1" style={{ color: '#636878' }}>
-          {loading
-            ? 'Fetching and summarizing articles'
-            : `No more ${topic} cards right now`}
+          {loading || polling
+            ? 'Récupération et résumé des articles en cours'
+            : topic === 'all'
+              ? 'Aucune carte disponible pour le moment'
+              : `Aucune carte "${topic}" pour l'instant`}
         </p>
       </div>
-      {!loading && (
-        <button
-          onClick={onRefresh}
-          className="font-mono text-xs tracking-widest uppercase px-4 py-2 rounded-lg transition-all"
-          style={{
-            background: 'rgba(194,245,66,0.08)',
-            color: '#c2f542',
-            border: '1px solid rgba(194,245,66,0.2)',
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(194,245,66,0.14)')}
-          onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(194,245,66,0.08)')}
-        >
-          Refresh feed
-        </button>
-      )}
-      {loading && (
+      {(loading || polling) && (
         <div className="flex gap-1.5">
           {[0, 1, 2].map((i) => (
             <motion.div
@@ -53,6 +41,21 @@ function EmptyState({ topic, onRefresh, loading }) {
           ))}
         </div>
       )}
+      {!loading && !polling && (
+        <button
+          onClick={onRefresh}
+          className="font-mono text-xs tracking-widest uppercase px-4 py-2 rounded-lg transition-all"
+          style={{
+            background: 'rgba(194,245,66,0.08)',
+            color: '#c2f542',
+            border: '1px solid rgba(194,245,66,0.2)',
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(194,245,66,0.14)')}
+          onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(194,245,66,0.08)')}
+        >
+          Actualiser
+        </button>
+      )}
     </div>
   )
 }
@@ -60,20 +63,23 @@ function EmptyState({ topic, onRefresh, loading }) {
 export default function CardStack({ topic, onSaveSuccess }) {
   const [cards, setCards] = useState([])
   const [loading, setLoading] = useState(true)
+  const [polling, setPolling] = useState(false)
   const [lastSwiped, setLastSwiped] = useState(null)
   const fetching = useRef(false)
+  const pollRef = useRef(null)
 
   const fetchCards = useCallback(async (currentCards = []) => {
     if (fetching.current) return
     fetching.current = true
     try {
       const fresh = await api.getCards(topic, 10)
-      // Merge new cards without duplicates
       const existingIds = new Set(currentCards.map((c) => c.id))
       const merged = [...currentCards, ...fresh.filter((c) => !existingIds.has(c.id))]
       setCards(merged)
+      return merged.length
     } catch (err) {
       console.error('[CardStack] fetch failed:', err)
+      return 0
     } finally {
       setLoading(false)
       fetching.current = false
@@ -88,20 +94,55 @@ export default function CardStack({ topic, onSaveSuccess }) {
     }
   }, [topic])
 
+  // Start polling when cards are empty (ingestion in progress)
+  const startPolling = useCallback(() => {
+    if (pollRef.current) return
+    setPolling(true)
+    pollRef.current = setInterval(async () => {
+      const count = await fetchCards([])
+      if (count > 0) {
+        clearInterval(pollRef.current)
+        pollRef.current = null
+        setPolling(false)
+      }
+    }, POLL_INTERVAL)
+  }, [fetchCards])
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current)
+      pollRef.current = null
+    }
+    setPolling(false)
+  }, [])
+
   // Initial load
   useEffect(() => {
     setCards([])
     setLoading(true)
     setLastSwiped(null)
+    stopPolling()
     triggerIngest().then(() => fetchCards([]))
-  }, [topic, fetchCards, triggerIngest])
+  }, [topic]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Start polling when empty after load
+  useEffect(() => {
+    if (!loading && cards.length === 0) {
+      startPolling()
+    } else if (cards.length > 0) {
+      stopPolling()
+    }
+  }, [loading, cards.length]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Cleanup on unmount
+  useEffect(() => () => stopPolling(), [stopPolling])
 
   // Refetch when queue drops low
   useEffect(() => {
-    if (!loading && cards.length < REFETCH_THRESHOLD) {
+    if (!loading && cards.length > 0 && cards.length < REFETCH_THRESHOLD) {
       fetchCards(cards)
     }
-  }, [cards.length, loading])
+  }, [cards.length, loading]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSave = useCallback(async (id) => {
     const card = cards.find((c) => c.id === id)
@@ -136,9 +177,11 @@ export default function CardStack({ topic, onSaveSuccess }) {
 
   const handleRefresh = useCallback(async () => {
     setLoading(true)
+    stopPolling()
     await triggerIngest()
-    await fetchCards([])
-  }, [triggerIngest, fetchCards])
+    const count = await fetchCards([])
+    if (count === 0) startPolling()
+  }, [triggerIngest, fetchCards, startPolling, stopPolling])
 
   const visibleCards = cards.slice(0, VISIBLE_CARDS)
   const isEmpty = !loading && cards.length === 0
@@ -149,7 +192,12 @@ export default function CardStack({ topic, onSaveSuccess }) {
       <div className="relative flex-1 card-stack">
         <AnimatePresence>
           {isEmpty ? (
-            <EmptyState topic={topic} onRefresh={handleRefresh} loading={loading} />
+            <EmptyState
+              topic={topic}
+              onRefresh={handleRefresh}
+              loading={loading}
+              polling={polling}
+            />
           ) : (
             [...visibleCards].reverse().map((card, reverseIdx) => {
               const stackIndex = visibleCards.length - 1 - reverseIdx
@@ -168,7 +216,7 @@ export default function CardStack({ topic, onSaveSuccess }) {
           )}
         </AnimatePresence>
 
-        {/* Loading skeleton cards when fetching and no cards yet */}
+        {/* Loading skeleton */}
         {loading && cards.length === 0 && (
           <div
             className="absolute inset-0 rounded-2xl skeleton"
@@ -196,7 +244,7 @@ export default function CardStack({ topic, onSaveSuccess }) {
           }}
         >
           <span style={{ fontSize: '1rem' }}>↩</span>
-          Undo
+          Annuler
         </motion.button>
 
         {/* Swipe hints */}
@@ -204,10 +252,10 @@ export default function CardStack({ topic, onSaveSuccess }) {
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-1.5 hint-left">
               <span style={{ color: '#ff453a', fontSize: 18 }}>←</span>
-              <span className="font-mono text-[9px] tracking-widest uppercase" style={{ color: '#3d4050' }}>Skip</span>
+              <span className="font-mono text-[9px] tracking-widest uppercase" style={{ color: '#3d4050' }}>Ignorer</span>
             </div>
             <div className="flex items-center gap-1.5 hint-right">
-              <span className="font-mono text-[9px] tracking-widest uppercase" style={{ color: '#3d4050' }}>Save</span>
+              <span className="font-mono text-[9px] tracking-widest uppercase" style={{ color: '#3d4050' }}>Sauver</span>
               <span style={{ color: '#c2f542', fontSize: 18 }}>→</span>
             </div>
           </div>
@@ -229,7 +277,7 @@ export default function CardStack({ topic, onSaveSuccess }) {
               cursor: isEmpty ? 'not-allowed' : 'pointer',
               opacity: isEmpty ? 0.4 : 1,
             }}
-            title="Skip"
+            title="Ignorer"
           >
             ✕
           </motion.button>
@@ -247,7 +295,7 @@ export default function CardStack({ topic, onSaveSuccess }) {
               cursor: isEmpty ? 'not-allowed' : 'pointer',
               opacity: isEmpty ? 0.4 : 1,
             }}
-            title="Save"
+            title="Sauvegarder"
           >
             ✓
           </motion.button>

@@ -3,6 +3,7 @@ import { motion } from 'framer-motion'
 import { api } from '../api/client.js'
 
 const TOPIC_ICONS = {
+  all: '✦',
   llm: '◈',
   bioinformatics: '⬡',
   cybersecurity: '◉',
@@ -25,9 +26,11 @@ export default function TopicSelector({ current, onChange }) {
       .catch(() => setTopics(DEFAULT_TOPICS))
   }, [])
 
+  const all = [{ id: 'all', label: 'Tous' }, ...topics]
+
   return (
     <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide">
-      {topics.map((topic) => {
+      {all.map((topic) => {
         const active = topic.id === current
         return (
           <motion.button

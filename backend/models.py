@@ -17,8 +17,10 @@ class TechCard(SQLModel, table=True):
     image_url: Optional[str] = None
     published_date: Optional[str] = None
     topic: str = "llm"
+    reading_time: Optional[int] = None  # estimated minutes
     saved: bool = False
     ignored: bool = False
+    ignored_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -35,6 +37,7 @@ class TechCardRead(SQLModel):
     image_url: Optional[str] = None
     published_date: Optional[str] = None
     topic: str
+    reading_time: Optional[int] = None
 
 
 def card_to_read(card: TechCard) -> TechCardRead:
@@ -51,4 +54,5 @@ def card_to_read(card: TechCard) -> TechCardRead:
         image_url=card.image_url,
         published_date=card.published_date,
         topic=card.topic,
+        reading_time=card.reading_time,
     )

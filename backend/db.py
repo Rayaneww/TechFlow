@@ -10,6 +10,17 @@ engine = create_engine(DATABASE_URL, echo=False, connect_args={"check_same_threa
 
 def create_db_and_tables():
     SQLModel.metadata.create_all(engine)
+    # Migration: add columns that may not exist in older DBs
+    with engine.connect() as conn:
+        for col_def in [
+            "ALTER TABLE techcard ADD COLUMN ignored_at DATETIME",
+            "ALTER TABLE techcard ADD COLUMN reading_time INTEGER",
+        ]:
+            try:
+                conn.execute(__import__("sqlalchemy").text(col_def))
+                conn.commit()
+            except Exception:
+                pass  # Column already exists
 
 
 def get_session():

@@ -17,7 +17,7 @@ async function request(path, options = {}) {
 export const api = {
   getTopics: () => request('/topics'),
 
-  getCards: (topic = 'llm', limit = 10) =>
+  getCards: (topic = 'all', limit = 10) =>
     request(`/cards?topic=${topic}&limit=${limit}`),
 
   saveCard: (id) =>
@@ -29,8 +29,14 @@ export const api = {
   unsaveCard: (id) =>
     request(`/cards/${id}/unsave`, { method: 'POST' }),
 
+  restoreCard: (id) =>
+    request(`/cards/${id}/restore`, { method: 'POST' }),
+
   getSaved: () => request('/saved'),
 
-  ingest: (topic = 'llm') =>
+  getHistory: (period = '7d', topic = 'all') =>
+    request(`/history?period=${period}&topic=${topic}`),
+
+  ingest: (topic = 'all') =>
     request(`/ingest?topic=${topic}`, { method: 'POST' }),
 }

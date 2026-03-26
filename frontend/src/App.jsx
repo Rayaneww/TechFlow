@@ -5,7 +5,7 @@ import SavedList from './components/SavedList.jsx'
 import TopicSelector from './components/TopicSelector.jsx'
 
 export default function App() {
-  const [topic, setTopic] = useState('llm')
+  const [topic, setTopic] = useState('all')
   const [savedOpen, setSavedOpen] = useState(false)
   const [savedRefreshKey, setSavedRefreshKey] = useState(0)
 
