@@ -18,6 +18,7 @@ from rss import TOPICS, fetch_articles
 load_dotenv()
 
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
+_wildcard_cors = CORS_ORIGINS == ["*"]
 
 # Track in-progress ingestion per topic to avoid concurrent fetches
 _ingesting: set[str] = set()
@@ -34,7 +35,7 @@ app = FastAPI(title="TechFlow API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
-    allow_credentials=True,
+    allow_credentials=not _wildcard_cors,
     allow_methods=["*"],
     allow_headers=["*"],
 )
