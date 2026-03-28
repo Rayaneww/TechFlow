@@ -1,34 +1,34 @@
-version: '3.9'
-
 services:
   backend:
+    image: ${DOCKER_USERNAME:-local}/techflow-backend:latest
     build:
       context: ./backend
       dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
+    restart: unless-stopped
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - DATABASE_URL=sqlite:///./techflow.db
-      - CORS_ORIGINS=http://localhost:5173
+      DATABASE_URL: sqlite:////app/data/techflow.db
+      CORS_ORIGINS: "*"
     volumes:
-      - ./backend:/app
-      - backend_db:/app/data
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+      - db_data:/app/data
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "uv", "run", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   frontend:
+    image: ${DOCKER_USERNAME:-local}/techflow-frontend:latest
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    restart: unless-stopped
     ports:
-      - "5173:5173"
-    environment:
-      - VITE_API_URL=http://localhost:8000
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    command: pnpm dev --host
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
 
 volumes:
-  backend_db:
+  db_data:

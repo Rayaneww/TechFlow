@@ -1,161 +1,175 @@
-import asyncio
-import json
-import os
-from pathlib import Path
+"""
+Card generation without any AI/LLM.
+Produces TechCards from RSS article data using text heuristics only.
+"""
+import re
 
-from dotenv import load_dotenv
+# ── Keyword taxonomy per topic ────────────────────────────────────────────────
+_TOPIC_TAGS: dict[str, list[str]] = {
+    "llm": [
+        "llm", "transformer", "gpt", "bert", "fine-tuning", "inference", "embedding",
+        "rag", "agent", "prompt", "tokenizer", "diffusion", "multimodal", "instruct",
+        "reasoning", "benchmark", "hallucination", "alignment", "rlhf",
+    ],
+    "bioinformatics": [
+        "genome", "rna", "dna", "protein", "sequencing", "crispr", "variant",
+        "alignment", "phylogenetic", "metagenomics", "proteomics", "cell",
+        "mutation", "cancer", "drug", "clinical", "biomarker",
+    ],
+    "cybersecurity": [
+        "vulnerability", "exploit", "malware", "ransomware", "phishing", "cve",
+        "patch", "zero-day", "breach", "authentication", "encryption", "botnet",
+        "backdoor", "privilege", "injection", "firewall", "threat",
+    ],
+    "devops": [
+        "kubernetes", "docker", "ci/cd", "terraform", "helm", "observability",
+        "deployment", "pipeline", "container", "microservice", "monitoring", "gitops",
+        "ansible", "prometheus", "grafana", "artifact", "cluster",
+    ],
+}
 
-load_dotenv()
+# Vocabulary that signals high difficulty (score +1 each)
+_ADVANCED_TERMS = {
+    "stochastic", "gradient", "backpropagation", "eigenvalue", "entropy",
+    "probabilistic", "asymptotic", "adversarial", "autoregressive", "contrastive",
+    "quantization", "distillation", "regularization", "normalization", "variational",
+    "bayesian", "heuristic", "parallelism", "concurrency", "polymorphism",
+    "diffusion", "latent", "encoder", "decoder", "attention", "transformer",
+}
 
-PROMPT_PATH = Path(__file__).parent / "prompts" / "card_prompt.txt"
-SYSTEM_PROMPT = PROMPT_PATH.read_text().strip()
-
-GROQ_KEY = os.getenv("GROQ_API_KEY", "")
-ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-OPENAI_KEY = os.getenv("OPENAI_API_KEY", "")
-GEMINI_KEY = os.getenv("GEMINI_API_KEY", "")
-
-
-def _build_user_message(article: dict) -> str:
-    return (
-        f"Title: {article['original_title']}\n"
-        f"Source: {article['source']}\n"
-        f"URL: {article['url']}\n"
-        f"Content: {article.get('summary_raw', '')[:800]}"
-    )
-
-
-def _parse_json(text: str) -> dict:
-    text = text.strip()
-    # Strip markdown fences if present
-    if text.startswith("```"):
-        text = text.split("```")[1]
-        if text.startswith("json"):
-            text = text[4:]
-    return json.loads(text.strip())
-
-
-def _validate_card(data: dict) -> dict:
-    rt = data.get("reading_time")
-    return {
-        "title": str(data.get("title", "Untitled"))[:120],
-        "key_points": [str(p) for p in data.get("key_points", [])[:3]],
-        "difficulty": int(data.get("difficulty", 2)),
-        "tags": [str(t).lower() for t in data.get("tags", [])[:4]],
-        "summary": str(data.get("summary", ""))[:300],
-        "reading_time": int(rt) if rt else None,
-    }
-
-
-async def generate_card_groq(article: dict) -> dict:
-    from groq import AsyncGroq
-
-    client = AsyncGroq(api_key=GROQ_KEY)
-    for attempt in range(3):
-        try:
-            resp = await client.chat.completions.create(
-                model="llama-3.1-8b-instant",
-                max_tokens=512,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": _build_user_message(article)},
-                ],
-            )
-            raw = resp.choices[0].message.content
-            return _validate_card(_parse_json(raw))
-        except Exception as e:
-            if "429" in str(e) and attempt < 2:
-                await asyncio.sleep(5 * (attempt + 1))
-                continue
-            raise
+# Vocabulary that signals intermediate difficulty (score +0.5 each)
+_INTERMEDIATE_TERMS = {
+    "api", "framework", "microservice", "container", "pipeline", "inference",
+    "deployment", "benchmark", "architecture", "optimization", "integration",
+    "dataset", "training", "evaluation", "orchestration", "configuration",
+    "tokenization", "embedding", "model", "cluster", "replica",
+}
 
 
-async def generate_card_anthropic(article: dict) -> dict:
-    import anthropic
+# ── Text helpers ──────────────────────────────────────────────────────────────
 
-    client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_KEY)
-    message = await client.messages.create(
-        model="claude-sonnet-4-5",
-        max_tokens=512,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": _build_user_message(article)}],
-    )
-    raw = message.content[0].text
-    return _validate_card(_parse_json(raw))
+def _clean(text: str) -> str:
+    text = re.sub(r"<[^>]+>", " ", text)          # strip HTML tags
+    text = re.sub(r"&[a-zA-Z#0-9]+;", " ", text)  # HTML entities
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
 
-async def generate_card_openai(article: dict) -> dict:
-    from openai import AsyncOpenAI
-
-    client = AsyncOpenAI(api_key=OPENAI_KEY)
-    resp = await client.chat.completions.create(
-        model="gpt-4o-mini",
-        max_tokens=512,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": _build_user_message(article)},
-        ],
-    )
-    raw = resp.choices[0].message.content
-    return _validate_card(_parse_json(raw))
+def _sentences(text: str) -> list[str]:
+    parts = re.split(r"(?<=[.!?])\s+", text)
+    return [p.strip() for p in parts if len(p.strip()) > 25]
 
 
-async def generate_card_gemini(article: dict) -> dict:
-    from google import genai
+# ── Card field generators ─────────────────────────────────────────────────────
 
-    client = genai.Client(api_key=GEMINI_KEY)
-    prompt = f"{SYSTEM_PROMPT}\n\n{_build_user_message(article)}"
-    response = await client.aio.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=prompt,
-    )
-    raw = response.text
-    return _validate_card(_parse_json(raw))
-
-
-def _fallback_card(article: dict) -> dict:
-    """Create a basic card without AI when both providers fail."""
-    title = article["original_title"]
+def _make_title(original: str) -> str:
+    """Trim to ≤8 words, remove trailing ' | Source' or ' - Source'."""
+    title = re.sub(r"\s*[\|—–\-]\s*\S.{2,}$", "", original).strip()
     words = title.split()
-    short_title = " ".join(words[:8]) if len(words) > 8 else title
+    return " ".join(words[:8]) if len(words) > 8 else title
 
-    return {
-        "title": short_title,
-        "key_points": [
-            f"Read the full article from {article['source']}",
-            "Click 'Read article' for details",
-            "Save to your reading list for later",
-        ],
-        "difficulty": 2,
-        "tags": [article["topic"]],
-        "summary": article.get("summary_raw", "")[:120] or "No summary available.",
-    }
 
+def _make_key_points(summary: str, source: str) -> list[str]:
+    """Extract 3 informative sentences, trimmed to ≤15 words each."""
+    sents = _sentences(summary)
+    points: list[str] = []
+
+    for s in sents[:8]:
+        words = s.split()
+        if len(words) < 5:
+            continue
+        snippet = " ".join(words[:15]) + ("..." if len(words) > 15 else "")
+        points.append(snippet)
+        if len(points) == 3:
+            break
+
+    fallbacks = [
+        f"Source: {source} — click 'Read article' for the full text",
+        "Save this card to revisit it later from your reading list",
+        "Swipe right to keep, left to skip",
+    ]
+    while len(points) < 3:
+        points.append(fallbacks[len(points)])
+
+    return points[:3]
+
+
+def _make_summary(summary: str, original_title: str) -> str:
+    """First clean sentence of ≤20 words, or fallback to title."""
+    for s in _sentences(summary):
+        words = s.split()
+        if 6 <= len(words) <= 30:
+            return " ".join(words[:20]) + ("..." if len(words) > 20 else "")
+    words = original_title.split()
+    return " ".join(words[:20])
+
+
+def _make_tags(text: str, topic: str) -> list[str]:
+    """Return [topic] + up to 3 matched keywords from the taxonomy."""
+    lower = text.lower()
+    hits: list[str] = []
+    for kw in _TOPIC_TAGS.get(topic, []):
+        if kw in lower:
+            hits.append(kw)
+        if len(hits) == 3:
+            break
+    return ([topic] + hits)[:4]
+
+
+def _make_difficulty(text: str) -> int:
+    """
+    Score text vocabulary:
+      advanced term  → +1.0
+      intermediate   → +0.5
+      avg word len > 6.5 → +1.5  (technical prose)
+    Score ≥ 4 → 3 (specialist), ≥ 2 → 2 (intermediate), else → 1
+    """
+    words = re.findall(r"\b[a-zA-Z]{3,}\b", text.lower())
+    if not words:
+        return 2
+
+    avg_len = sum(len(w) for w in words) / len(words)
+    score = 0.0
+    if avg_len > 6.5:
+        score += 1.5
+    elif avg_len > 5.5:
+        score += 0.5
+
+    for w in words:
+        if w in _ADVANCED_TERMS:
+            score += 1.0
+        elif w in _INTERMEDIATE_TERMS:
+            score += 0.5
+        if score >= 6:   # cap early for performance
+            break
+
+    if score >= 4:
+        return 3
+    if score >= 2:
+        return 2
+    return 1
+
+
+def _reading_time(text: str) -> int:
+    """Estimate minutes to read at 200 wpm."""
+    return max(1, round(len(text.split()) / 200))
+
+
+# ── Public API (same signature as the old AI version) ────────────────────────
 
 async def generate_card(article: dict) -> dict:
-    try:
-        if GROQ_KEY:
-            return await generate_card_groq(article)
-    except Exception as e:
-        print(f"[ai] Groq failed: {e}")
+    """Build a TechCard dict from RSS article data — no LLM, no network call."""
+    raw = _clean(article.get("summary_raw", ""))
+    title = article.get("original_title", "Untitled")
+    source = article.get("source", "")
+    topic = article.get("topic", "llm")
+    combined = f"{title} {raw}"
 
-    try:
-        if GEMINI_KEY:
-            return await generate_card_gemini(article)
-    except Exception as e:
-        print(f"[ai] Gemini failed: {e}")
-
-    try:
-        if ANTHROPIC_KEY:
-            return await generate_card_anthropic(article)
-    except Exception as e:
-        print(f"[ai] Anthropic failed: {e}")
-
-    try:
-        if OPENAI_KEY:
-            return await generate_card_openai(article)
-    except Exception as e:
-        print(f"[ai] OpenAI failed: {e}")
-
-    print("[ai] Using fallback card generation")
-    return _fallback_card(article)
+    return {
+        "title": _make_title(title),
+        "key_points": _make_key_points(raw, source),
+        "difficulty": _make_difficulty(combined),
+        "tags": _make_tags(combined, topic),
+        "summary": _make_summary(raw, title),
+        "reading_time": _reading_time(raw),
+    }
